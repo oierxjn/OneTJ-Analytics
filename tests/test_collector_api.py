@@ -34,13 +34,20 @@ def test_success() -> None:
     assert body["request_id"]
 
 
-def test_missing_required_field() -> None:
+def test_omitted_field_is_allowed() -> None:
     client = create_client()
     payload = build_payload()
     payload.pop("userid")
     response = client.post("/collector/v1/events", json=payload)
-    assert response.status_code == 400
-    assert response.json()["code"] == "BAD_REQUEST"
+    assert response.status_code == 200
+    assert response.json()["code"] == "SUCCESS"
+
+
+def test_all_fields_omitted_is_allowed() -> None:
+    client = create_client()
+    response = client.post("/collector/v1/events", json={})
+    assert response.status_code == 200
+    assert response.json()["code"] == "SUCCESS"
 
 
 def test_non_string_field() -> None:
@@ -59,6 +66,16 @@ def test_blank_string_is_rejected() -> None:
     response = client.post("/collector/v1/events", json=payload)
     assert response.status_code == 400
     assert response.json()["code"] == "BAD_REQUEST"
+    assert response.json()["message"] == "field 'userid' must not be empty"
+
+
+def test_school_name_can_be_empty() -> None:
+    client = create_client()
+    payload = build_payload()
+    payload["school_name"] = "   "
+    response = client.post("/collector/v1/events", json=payload)
+    assert response.status_code == 200
+    assert response.json()["code"] == "SUCCESS"
 
 
 def test_unsupported_media_type() -> None:
