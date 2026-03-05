@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, field_validator
 
@@ -14,6 +14,8 @@ class EventIn(BaseModel):
     gender: str
     platform: str
 
+    ALLOW_EMPTY_FIELDS: ClassVar[set[str]] = {"school_name"}
+
     @field_validator("*", mode="before")
     @classmethod
     def ensure_string(cls, value: object) -> str:
@@ -23,8 +25,8 @@ class EventIn(BaseModel):
 
     @field_validator("*", mode="after")
     @classmethod
-    def ensure_non_empty(cls, value: str) -> str:
-        if not value:
+    def ensure_non_empty(cls, value: str, info) -> str:
+        if not value and info.field_name not in cls.ALLOW_EMPTY_FIELDS:
             raise ValueError("must not be empty")
         return value
 
@@ -34,4 +36,3 @@ class ApiResponse(BaseModel):
     code: str
     message: str
     request_id: str
-
