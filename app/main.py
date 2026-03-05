@@ -30,6 +30,26 @@ def request_id_from(request: Request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
 
+def format_validation_message(exc: RequestValidationError) -> str:
+    first_error = exc.errors()[0]
+    loc = first_error.get("loc", ())
+    msg = first_error.get("msg", "invalid request")
+    field = None
+    if len(loc) >= 2 and loc[0] == "body" and isinstance(loc[1], str):
+        field = loc[1]
+
+    normalized_msg = str(msg).lower()
+    if field:
+        if normalized_msg == "field required":
+            return f"missing required field: {field}"
+        if "must not be empty" in normalized_msg:
+            return f"field '{field}' must not be empty"
+        if "must be a string" in normalized_msg:
+            return f"field '{field}' must be a string"
+        return f"field '{field}' {msg}"
+    return str(msg)
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     app = FastAPI(title=settings.app_name)
@@ -38,7 +58,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         request_id = request_id_from(request)
-        return build_error(status.HTTP_400_BAD_REQUEST, "BAD_REQUEST", str(exc.errors()[0]["msg"]), request_id)
+        return build_error(
+            status.HTTP_400_BAD_REQUEST,
+            "BAD_REQUEST",
+            format_validation_message(exc),
+            request_id,
+        )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
