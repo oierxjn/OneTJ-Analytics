@@ -5,11 +5,17 @@ from threading import Lock
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
+from starlette.types import ASGIApp
 
 from app.config import Settings
 
-
+# 获取客户端IP地址
+#
+# 优先从请求头中获取 "x-forwarded-for" 字段，该字段包含客户端的真实IP地址
+# 如果不存在该字段，则返回请求的客户端主机地址
+# 如果请求中没有客户端信息，则返回 "unknown"
 def get_client_ip(request: Request) -> str:
     x_forwarded_for = request.headers.get("x-forwarded-for", "").strip()
     if x_forwarded_for:
@@ -32,13 +38,13 @@ def error_response(status_code: int, code: str, message: str, request_id: str) -
 
 
 class CollectorMiddleware(BaseHTTPMiddleware):
-    def __init__(self, app, settings: Settings) -> None:
+    def __init__(self, app: ASGIApp, settings: Settings) -> None:
         super().__init__(app)
         self.settings = settings
         self.lock = Lock()
         self.window_by_ip: dict[str, deque[float]] = defaultdict(deque)
 
-    async def dispatch(self, request: Request, call_next):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         request_id = str(uuid.uuid4())
         request.state.request_id = request_id
 

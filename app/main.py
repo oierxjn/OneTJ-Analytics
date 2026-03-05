@@ -29,7 +29,7 @@ def build_error(status_code: int, code: str, message: str, request_id: str) -> J
 def request_id_from(request: Request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
-
+# 格式化请求验证错误消息
 def format_validation_message(exc: RequestValidationError) -> str:
     first_error = exc.errors()[0]
     loc = first_error.get("loc", ())
