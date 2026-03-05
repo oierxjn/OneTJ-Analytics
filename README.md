@@ -1,21 +1,20 @@
-# OneTJ Analytics Backend (V1)
+# OneTJ Analytics 后端服务
 
-FastAPI-based data collector backend for OneTJ client integration tests.
+基于 FastAPI 的数据采集后端，用于 OneTJ 客户端集成测试。
 
-## Features
+## 功能说明
 
-- `POST /collector/v1/events` only.
-- JSON request body validation for required string fields.
-- Trim + non-empty validation for all required fields.
-- Unified response contract with `status/code/message/request_id`.
-- IP-based rate limiting (`16 req/min/IP` by default).
-- Client IP resolution rule:
-  - Prefer first IP from `X-Forwarded-For`.
-  - Fallback to direct client IP.
-- Masked logging for sensitive fields (`userid`, `username`).
-- Optional HTTPS-only mode via env var.
+- 仅提供 `POST /collector/v1/events` 接口。
+- 对请求 JSON 的字符串字段进行校验。
+- 对大部分字段执行去空白（trim）与非空校验。
+- 统一响应格式：`status/code/message/request_id`。
+- 基于 IP 的限流（默认 `16 次/分钟/IP`）。
+- 客户端 IP 解析规则：
+  - 优先取 `X-Forwarded-For` 的第一个 IP。
+  - 若无该头，则回退到直连客户端 IP。
+- 对敏感字段（`userid`、`username`）进行脱敏日志记录。
 
-## Local Setup (Windows PowerShell)
+## 本地环境准备（Windows PowerShell）
 
 ```powershell
 python -m venv .venv
@@ -23,19 +22,42 @@ python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements-dev.txt
 ```
 
-## Run (HTTP test mode)
+## 本地环境准备（Linux）
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+```
+
+## 启动服务（HTTP 测试模式）
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Run Tests
+Linux 启动示例：
+
+```bash
+source .venv/bin/activate
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+## 运行测试
 
 ```powershell
 .\.venv\Scripts\python -m pytest -q
 ```
 
-## Example Request
+Linux 测试示例：
+
+```bash
+source .venv/bin/activate
+pytest -q
+```
+
+## 请求示例
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
@@ -47,17 +69,226 @@ curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
     "client_version":"1.2.3+45",
     "device_brand":"HUAWEI",
     "device_model":"Pura 70",
-    "dept_name":"计算机科学与技术学院",
+    "dept_name":"计算机学院",
     "school_name":"同济大学",
     "gender":"男",
     "platform":"ohos"
   }'
 ```
 
-## Config
+## 配置说明
 
-Copy `.env.example` to `.env` and adjust as needed.
+将 `.env.example` 复制为 `.env` 后按需修改：
 
-- `REQUIRE_HTTPS=true`: reject non-HTTPS requests.
-- `RATE_LIMIT_PER_MINUTE=16`: IP limit window threshold.
-- `MAX_PAYLOAD_BYTES=1048576`: payload hard limit by `Content-Length`.
+- `RATE_LIMIT_PER_MINUTE=16`：每分钟每 IP 请求上限。
+- `MAX_PAYLOAD_BYTES=1048576`：基于 `Content-Length` 的请求体大小上限。
+
+## HTTPS 配置
+
+### 开发环境（推荐 Nginx 自签证书）
+
+适用于本地联调。浏览器或客户端可能提示证书不受信任，属于正常现象。
+
+```bash
+# 1) 启动 Uvicorn（HTTP，仅内网/本机）
+uvicorn app.main:app --host 127.0.0.1 --port 8000
+
+# 2) 由 Nginx 终止 TLS（证书挂 Nginx）
+# 可使用下文 Linux 部署章节中的自签证书与 Nginx 配置模板
+```
+
+### 生产环境（正式证书，推荐挂在 Nginx）
+
+正式证书由受信任 CA 签发，不能只靠本地自签完成公网可信部署。
+
+前置条件：
+
+- 已有可访问的公网域名（例如 `api.example.com`）。
+- DNS 已将该域名解析到你的服务器公网 IP。
+
+使用 `certbot` 申请证书（Linux）：
+
+```bash
+# 方式一：由 certbot 自动配置 Nginx（推荐）
+sudo certbot --nginx -d api.example.com
+
+# 方式二：仅签发证书，不自动改 Nginx 配置
+sudo certbot certonly --standalone -d api.example.com
+```
+
+证书默认路径（Nginx 使用）：
+
+- 证书链：`/etc/letsencrypt/live/api.example.com/fullchain.pem`
+- 私钥：`/etc/letsencrypt/live/api.example.com/privkey.pem`
+
+推荐架构（默认）：
+
+- 对外：`Nginx` 监听 `443` 并终止 TLS（证书挂 Nginx）。
+- 对内：`Nginx -> Uvicorn` 走 `127.0.0.1:8000` 的 HTTP。
+
+Nginx 反代到 Uvicorn 时，Uvicorn 启动示例：
+
+```bash
+uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+  --proxy-headers --forwarded-allow-ips=127.0.0.1
+```
+
+说明：
+
+- Let's Encrypt 证书有效期通常为 90 天，需要配置自动续期（`certbot renew`）。
+- 生产默认建议采用 `Nginx/Caddy` 反向代理并终止 TLS，应用进程仅监听内网端口。
+- 不推荐直接让 Uvicorn 对公网暴露 `443`，除非你明确不使用反向代理。
+
+## Linux 生产运行建议（Ubuntu 24.04 实测）
+
+以下流程已在 `2026-03-05` 实际部署验证通过。
+
+### 1) 安装系统依赖
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv nginx openssl curl
+```
+
+### 2) 部署代码并准备运行环境
+
+```bash
+sudo mkdir -p /opt/OneTJ-Analytics
+# 将代码上传到 /opt/OneTJ-Analytics 后执行：
+cd /opt/OneTJ-Analytics
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-dev.txt
+
+cp .env.example .env
+sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=prod/' .env
+```
+
+### 3) 配置 systemd（开机自启）
+
+创建 `/etc/systemd/system/onetj-analytics.service`：
+
+```ini
+[Unit]
+Description=OneTJ Analytics FastAPI Service
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/OneTJ-Analytics
+EnvironmentFile=/opt/OneTJ-Analytics/.env
+ExecStart=/opt/OneTJ-Analytics/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动并设置开机自启：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now onetj-analytics
+sudo systemctl status onetj-analytics
+```
+
+查看日志：
+
+```bash
+sudo journalctl -u onetj-analytics -f
+```
+
+### 4) 配置 Nginx（HTTPS 反向代理）
+
+内网或无公网域名场景可先用自签证书：
+
+```bash
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout /etc/nginx/ssl/onetj-analytics.key \
+  -out /etc/nginx/ssl/onetj-analytics.crt \
+  -subj "/CN=192.168.134.136"
+```
+
+创建 `/etc/nginx/sites-available/onetj-analytics`：
+
+```nginx
+server {
+    listen 80 default_server;
+    server_name _;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+
+    ssl_certificate /etc/nginx/ssl/onetj-analytics.crt;
+    ssl_certificate_key /etc/nginx/ssl/onetj-analytics.key;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+启用站点并重载：
+
+```bash
+sudo ln -sf /etc/nginx/sites-available/onetj-analytics /etc/nginx/sites-enabled/onetj-analytics
+sudo rm -f /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### 5) 联调验证
+
+```bash
+curl -I http://192.168.134.136
+curl -k -X POST "https://192.168.134.136/collector/v1/events" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+期望结果：
+
+- HTTP 返回 `301` 并跳转到 HTTPS。
+- HTTPS 接口返回 `{"status":"ok","code":"SUCCESS"...}`。
+
+## 踩坑与排查（实测）
+
+### 1) `pytest -q` 报 `ModuleNotFoundError: No module named 'app'`
+
+现象：
+
+- 在 Linux 上直接运行 `.venv/bin/pytest -q` 可能出现导包失败。
+
+建议：
+
+- 使用 `PYTHONPATH=/opt/OneTJ-Analytics .venv/bin/pytest -q`，或
+- 使用 `python -m pytest -q`（确保当前目录是项目根目录）。
+
+### 2) 自签证书下 `curl`/浏览器提示证书不受信任
+
+现象：
+
+- 这是自签证书的正常表现，客户端会提示不受信任。
+
+建议：
+
+- 开发联调可使用 `curl -k` 跳过证书校验。
+- 生产环境务必替换为受信任 CA 证书（例如 Let's Encrypt）。
+
+### 3) 反向代理头未传递导致协议识别不完整
+
+建议：
+
+- Nginx 必须转发 `X-Forwarded-Proto`（通常设为 `$scheme`）。
+- Uvicorn 建议加 `--proxy-headers --forwarded-allow-ips=127.0.0.1`，让应用正确识别代理后的协议。
