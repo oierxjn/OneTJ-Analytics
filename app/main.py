@@ -93,7 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         logger.info(
             "accepted event request_id=%s payload=%s",
             request_id,
-            mask_sensitive_payload(payload.model_dump()),
+            mask_sensitive_payload(payload.model_dump(exclude_none=True)),
         )
         return ApiResponse(status="ok", code="SUCCESS", message="accepted", request_id=request_id)
 
