@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -6,8 +7,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.config import Settings
+from app.ingest import EventEnvelope, EventProducer, build_event_producer
 from app.logging_utils import mask_sensitive_payload
-from app.middleware import CollectorMiddleware
+from app.middleware import CollectorMiddleware, get_client_ip
 from app.schemas import ApiResponse, EventIn
 
 logger = logging.getLogger("collector")
@@ -52,7 +54,17 @@ def format_validation_message(exc: RequestValidationError) -> str:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
-    app = FastAPI(title=settings.app_name)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        producer = build_event_producer(settings)
+        app.state.event_producer = producer
+        try:
+            yield
+        finally:
+            await producer.close()
+
+    app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(CollectorMiddleware, settings=settings)
 
     @app.exception_handler(RequestValidationError)
@@ -89,6 +101,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/collector/v1/events", response_model=ApiResponse)
     async def collect_events(payload: EventIn, request: Request) -> Any:
         request_id = request_id_from(request)
+        event_producer: EventProducer = request.app.state.event_producer
+        event = EventEnvelope.from_event(payload=payload, request_id=request_id, client_ip=get_client_ip(request))
+
+        try:
+            await event_producer.enqueue(event)
+        except Exception as exc:
+            logger.exception("failed to enqueue event request_id=%s error=%s", request_id, exc)
+            raise HTTPException(status_code=500, detail="failed to enqueue event") from exc
 
         logger.info(
             "accepted event request_id=%s payload=%s",

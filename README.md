@@ -14,6 +14,16 @@
   - 若无该头，则回退到直连客户端 IP。
 - 对敏感字段（`userid`、`username`）进行脱敏日志记录。
 
+## 数据流架构
+
+默认推荐链路如下：
+
+`Collector API -> Redis Stream -> Worker -> PostgreSQL(events_raw)`
+
+说明：
+
+- API 返回 `200` 表示请求已被接收（`redis` 模式下表示入队成功）。但不等于事件已写入数据库，落库由 worker 异步完成。
+
 ## 本地环境准备（Windows PowerShell）
 
 ```powershell
@@ -31,18 +41,51 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements-dev.txt
 ```
 
-## 启动服务（HTTP 测试模式）
+## 依赖服务准备（Redis + PostgreSQL）
+
+本项目落库链路依赖 Redis 和 PostgreSQL。默认配置见 `.env.example`：
+
+- `REDIS_URL=redis://127.0.0.1:6379/0`
+- `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics`
+
+请先确保本机 Redis 和 PostgreSQL 已启动，并且与上述地址一致。可用以下命令做最小连通性检查：
+
+```bash
+redis-cli -u redis://127.0.0.1:6379/0 ping
+psql "postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics" -c "SELECT 1;"
+```
+
+## 数据库初始化
+
+先执行建表脚本：
+
+```bash
+psql "postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics" -f sql/init_events.sql
+```
+
+## 启动服务（API + Worker）
+
+将 `.env.example` 复制为 `.env` 后，按场景修改配置。
+
+### Windows PowerShell
 
 ```powershell
 .\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python -m app.worker
 ```
 
-Linux 启动示例：
+### Linux
 
 ```bash
 source .venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m app.worker
 ```
+
+注意：
+
+- `INGEST_BACKEND=redis` 时，API 和 worker 需要同时运行。
+- `INGEST_BACKEND=memory` 时，仅内存暂存，不会写入数据库。
 
 ## 运行测试
 
@@ -76,12 +119,45 @@ curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
   }'
 ```
 
+## 最小端到端验证（确认落库）
+
+1. 启动 Redis、PostgreSQL、API、worker。
+2. 发送一条采集请求（见上方请求示例）。
+3. 在 PostgreSQL 查询最新数据：
+
+```sql
+SELECT id, request_id, received_at, platform
+FROM events_raw
+ORDER BY id DESC
+LIMIT 5;
+```
+
+如果有新增记录，说明链路已打通。
+
 ## 配置说明
 
 将 `.env.example` 复制为 `.env` 后按需修改：
 
+- `APP_NAME=OneTJ Data Collector`：服务名称。
+- `ENVIRONMENT=test`：运行环境标识。
+- `REQUIRE_HTTPS=false`：是否强制 HTTPS。
 - `RATE_LIMIT_PER_MINUTE=16`：每分钟每 IP 请求上限。
 - `MAX_PAYLOAD_BYTES=1048576`：基于 `Content-Length` 的请求体大小上限。
+- `INGEST_BACKEND=memory|redis`：事件接入后端。`memory` 仅用于本地/测试，生产建议 `redis`。
+- `REDIS_URL=redis://127.0.0.1:6379/0`：Redis 连接地址。
+- `REDIS_STREAM_KEY=collector.events`：Redis Stream 名称。
+- `REDIS_STREAM_MAXLEN=1000000`：Stream 近似最大长度。
+- `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics`：PostgreSQL 连接地址。
+- `CONSUMER_GROUP=collector-workers`：worker 消费组名。
+- `CONSUMER_NAME=worker-1`：worker 消费者名。
+- `BATCH_SIZE=500`：单次读取批量上限。
+- `FLUSH_INTERVAL_MS=100`：空轮询时休眠间隔（毫秒）。
+- `CONSUME_BLOCK_MS=1000`：`xreadgroup` 阻塞时间（毫秒）。
+
+## 常见误区
+
+- 只启动 API 不启动 worker（且 `INGEST_BACKEND=redis`）时，消息会在 Redis 中积压。
+- 使用 `INGEST_BACKEND=memory` 时，重启进程后内存中的事件会丢失。
 
 ## HTTPS 配置
 
@@ -167,7 +243,7 @@ sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=prod/' .env
 
 ### 3) 配置 systemd（开机自启）
 
-创建 `/etc/systemd/system/onetj-analytics.service`：
+创建 API 服务 `/etc/systemd/system/onetj-analytics.service`：
 
 ```ini
 [Unit]
@@ -187,18 +263,41 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+创建 worker 服务 `/etc/systemd/system/onetj-analytics-worker.service`：
+
+```ini
+[Unit]
+Description=OneTJ Analytics Worker
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/OneTJ-Analytics
+EnvironmentFile=/opt/OneTJ-Analytics/.env
+ExecStart=/opt/OneTJ-Analytics/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
 启动并设置开机自启：
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable --now onetj-analytics
+sudo systemctl enable --now onetj-analytics-worker
 sudo systemctl status onetj-analytics
+sudo systemctl status onetj-analytics-worker
 ```
 
 查看日志：
 
 ```bash
 sudo journalctl -u onetj-analytics -f
+sudo journalctl -u onetj-analytics-worker -f
 ```
 
 ### 4) 配置 Nginx（HTTPS 反向代理）
