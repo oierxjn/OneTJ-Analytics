@@ -124,7 +124,7 @@ class EventIngestWorker:
             raise RuntimeError("unexpected stream entries type")
 
         for entry in stream_entries:
-            if not isinstance(entry, list):
+            if not isinstance(entry, Sequence):
                 logger.error("xreadgroup returned unexpected stream entry type %s; dropping this poll", type(entry))
                 raise RuntimeError("unexpected stream entry type")
             if len(entry) != 2:
