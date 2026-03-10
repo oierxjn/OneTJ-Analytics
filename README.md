@@ -49,6 +49,59 @@ python -m pip install -r requirements-dev.txt
 - `REDIS_URL=redis://127.0.0.1:6379/0`
 - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics`
 
+### Linux 安装（Ubuntu/Debian）
+
+```bash
+sudo apt-get update
+sudo apt-get install -y redis-server postgresql postgresql-client
+sudo systemctl enable --now redis-server
+sudo systemctl enable --now postgresql
+```
+
+### PostgreSQL 初始化（创建业务库和账号）
+
+```bash
+sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'postgres';"
+sudo -u postgres psql -c "CREATE DATABASE onetj_analytics OWNER postgres;"
+sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE onetj_analytics TO postgres;"
+```
+
+将 `.env` 中 `DATABASE_URL` 调整为：
+
+```dotenv
+DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics
+```
+
+### Redis 最小配置（可选）
+
+默认已可本机访问，如需显式确认可检查 `/etc/redis/redis.conf`：
+
+- `bind 127.0.0.1 ::1`
+- `port 6379`
+
+修改后重启：
+
+```bash
+sudo systemctl restart redis-server
+```
+
+### PostgreSQL 最小配置（可选）
+
+默认本机访问场景通常无需改动；若需手工确认：
+
+- `postgresql.conf`：`listen_addresses = '127.0.0.1'`
+- `pg_hba.conf`：确保存在 `host all all 127.0.0.1/32 scram-sha-256`（或 md5）
+
+修改后重启：
+
+```bash
+sudo systemctl restart postgresql
+```
+
+### Windows 开发机建议
+
+Redis 官方不再提供原生 Windows Server 版本，建议使用 WSL2 安装 Redis/PostgreSQL，再通过 `127.0.0.1` 访问；`.env` 连接串可保持与 Linux 相同。
+
 请先确保本机 Redis 和 PostgreSQL 已启动，并且与上述地址一致。可用以下命令做最小连通性检查：
 
 ```bash
