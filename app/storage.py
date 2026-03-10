@@ -13,6 +13,7 @@ class PersistedEvent:
     request_id: str
     received_at: datetime
     client_ip: str
+    hash_id: str
     userid: str | None
     username: str | None
     client_version: str | None
@@ -29,10 +30,12 @@ class PersistedEvent:
         normalized = normalize_stream_fields(fields)
         payload_raw = normalized.get("payload_json", "{}")
         payload = json.loads(payload_raw)
+        hash_id_raw = payload.get("hashId")
         return cls(
             request_id=normalized["request_id"],
             received_at=datetime.fromisoformat(normalized["received_at"]),
             client_ip=normalized.get("client_ip", "unknown"),
+            hash_id=_required_non_empty_str(hash_id_raw, "hashId"),
             userid=_as_nullable_str(payload.get("userid")),
             username=_as_nullable_str(payload.get("username")),
             client_version=_as_nullable_str(payload.get("client_version")),
@@ -71,6 +74,15 @@ def _as_nullable_str(value: Any) -> str | None:
     return str(value)
 
 
+def _required_non_empty_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string")
+    result = value.strip()
+    if not result:
+        raise ValueError(f"{field_name} must not be empty")
+    return result
+
+
 class PostgresEventWriter:
     def __init__(self, database_url: str, pool_min_size: int = 1, pool_max_size: int = 10) -> None:
         self.database_url = database_url
@@ -91,6 +103,9 @@ class PostgresEventWriter:
             self.pool = None
 
     async def insert_events(self, events: list[PersistedEvent]) -> None:
+        '''
+        row列和query参数的顺序要一致，否则会串列
+        '''
         if not events:
             return
         if self.pool is None:
@@ -101,6 +116,7 @@ class PostgresEventWriter:
                 e.request_id,
                 e.received_at,
                 e.client_ip,
+                e.hash_id,
                 e.userid,
                 e.username,
                 e.client_version,
@@ -120,6 +136,7 @@ class PostgresEventWriter:
                 request_id,
                 received_at,
                 client_ip,
+                hash_id,
                 userid,
                 username,
                 client_version,
@@ -132,7 +149,7 @@ class PostgresEventWriter:
                 payload_json
             )
             VALUES (
-                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb
+                $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb
             )
         """
         async with self.pool.acquire() as conn:

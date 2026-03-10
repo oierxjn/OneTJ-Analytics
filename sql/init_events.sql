@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS events_raw (
     request_id UUID NOT NULL,
     received_at TIMESTAMPTZ NOT NULL,
     client_ip INET NOT NULL,
+    hash_id TEXT NOT NULL,
     userid TEXT NULL,
     username TEXT NULL,
     client_version TEXT NULL,
@@ -19,3 +20,4 @@ CREATE TABLE IF NOT EXISTS events_raw (
 CREATE INDEX IF NOT EXISTS idx_events_raw_received_at_brin ON events_raw USING BRIN (received_at);
 CREATE INDEX IF NOT EXISTS idx_events_raw_received_platform ON events_raw (received_at DESC, platform);
 CREATE INDEX IF NOT EXISTS idx_events_raw_request_id ON events_raw (request_id);
+CREATE INDEX IF NOT EXISTS idx_events_raw_hash_id ON events_raw (hash_id);

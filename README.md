@@ -7,6 +7,7 @@
 - 仅提供 `POST /collector/v1/events` 接口。
 - 对请求 JSON 的字符串字段进行校验。
 - 对大部分字段执行去空白（trim）与非空校验。
+- `hashId` 为必填统计字段，缺失或空值直接返回 `400`
 - 统一响应格式：`status/code/message/request_id`。
 - 基于 IP 的限流（默认 `16 次/分钟/IP`）。
 - 客户端 IP 解析规则：
@@ -107,6 +108,7 @@ curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
   -H "Content-Type: application/json; charset=utf-8" \
   -H "Accept: application/json" \
   -d '{
+    "hashId":"hash-2333333",
     "userid":"2333333",
     "username":"张三",
     "client_version":"1.2.3+45",
@@ -126,7 +128,7 @@ curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
 3. 在 PostgreSQL 查询最新数据：
 
 ```sql
-SELECT id, request_id, received_at, platform
+SELECT id, request_id, hash_id, received_at, platform
 FROM events_raw
 ORDER BY id DESC
 LIMIT 5;

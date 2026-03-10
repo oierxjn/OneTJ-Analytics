@@ -4,6 +4,7 @@ from pydantic import BaseModel, field_validator
 
 
 class EventIn(BaseModel):
+    hashId: str
     userid: str | None = None
     username: str | None = None
     client_version: str | None = None

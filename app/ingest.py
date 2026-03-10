@@ -25,7 +25,7 @@ class EventEnvelope:
             request_id=request_id,
             received_at=datetime.now(timezone.utc).isoformat(),
             client_ip=client_ip,
-            payload=payload.model_dump(exclude_none=False),
+            payload=payload.model_dump(by_alias=True, exclude_none=False),
         )
 
     def to_stream_fields(self) -> StreamFields:
