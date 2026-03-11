@@ -61,9 +61,8 @@ sudo systemctl enable --now postgresql
 ### PostgreSQL 初始化（创建业务库和账号）
 
 ```bash
-sudo -u postgres psql -c "CREATE USER postgres WITH PASSWORD 'postgres';"
-sudo -u postgres psql -c "CREATE DATABASE onetj_analytics OWNER postgres;"
-sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE onetj_analytics TO postgres;"
+sudo -u postgres psql -c "ALTER USER postgres WITH PASSWORD 'postgres';"
+sudo -u postgres createdb onetj_analytics
 ```
 
 将 `.env` 中 `DATABASE_URL` 调整为：
@@ -108,6 +107,13 @@ Redis 官方不再提供原生 Windows Server 版本，建议使用 WSL2 安装 
 redis-cli -u redis://127.0.0.1:6379/0 ping
 psql "postgresql://postgres:postgres@127.0.0.1:5432/onetj_analytics" -c "SELECT 1;"
 ```
+
+期望输出：
+```
+PONG
+1
+```
+
 
 ## 数据库初始化
 
@@ -310,7 +316,7 @@ Type=simple
 User=www-data
 WorkingDirectory=/opt/OneTJ-Analytics
 EnvironmentFile=/opt/OneTJ-Analytics/.env
-ExecStart=/opt/OneTJ-Analytics/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips=127.0.0.1
+ExecStart=/opt/OneTJ-Analytics/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 
