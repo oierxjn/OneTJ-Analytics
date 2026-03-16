@@ -4,6 +4,8 @@ stages:
 
 default:
   image: python:3.12
+  tags:
+    - jkljkluiouio-VM-docker-runner
   cache:
     key: "$CI_JOB_NAME"
     paths:
@@ -23,7 +25,7 @@ test:
     - python -m venv .venv
     - . .venv/bin/activate
     - python -m pip install --upgrade pip
-    - python -m pip install -r requirements-dev.txt
+    - python -m pip install -r requirements.txt
     - python -m pytest -q
   rules:
     - if: '$CI_PIPELINE_SOURCE == "push"'

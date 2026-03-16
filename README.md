@@ -469,6 +469,7 @@ curl -k -X POST "https://192.168.134.136/collector/v1/events" \
 - `main` 分支 `push` 成功后，出现一个手动 `deploy` 任务。
 - 测试阶段固定使用 `INGEST_BACKEND=memory`，因此不依赖 Redis 和 PostgreSQL。
 - 部署阶段按当前 README 的 Linux 运行方式，通过 SSH 登录服务器并重启 systemd 服务。
+- 当前流水线默认绑定 runner tag：`jkljkluiouio-VM-docker-runner`。
 
 ### 部署阶段依赖的 GitLab CI/CD Variables
 
