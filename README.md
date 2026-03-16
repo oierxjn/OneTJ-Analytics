@@ -30,7 +30,7 @@
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install --upgrade pip
-.\.venv\Scripts\python -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
 ## 本地环境准备（Linux）
@@ -39,7 +39,7 @@ python -m venv .venv
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements.txt
 ```
 
 ## 依赖服务准备（Redis + PostgreSQL）
@@ -159,6 +159,14 @@ Linux 测试示例：
 source .venv/bin/activate
 pytest -q
 ```
+
+GitLab CI 中也建议使用：
+
+```bash
+python -m pytest -q
+```
+
+这样可以避免某些 Linux 环境下直接调用 `pytest` 时出现导包路径问题。
 
 ## 请求示例
 
@@ -296,7 +304,7 @@ cd /opt/OneTJ-Analytics
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -r requirements-dev.txt
+python -m pip install -r requirements.txt
 
 cp .env.example .env
 sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=prod/' .env
@@ -452,3 +460,52 @@ curl -k -X POST "https://192.168.134.136/collector/v1/events" \
 
 - Nginx 必须转发 `X-Forwarded-Proto`（通常设为 `$scheme`）。
 - Uvicorn 建议加 `--proxy-headers --forwarded-allow-ips=127.0.0.1`，让应用正确识别代理后的协议。
+
+## GitLab CI/CD 流水线
+
+仓库根目录已提供 `.gitlab-ci.yml`，默认行为如下：
+
+- 任意分支 `push` 或 `Merge Request` 时自动执行测试。
+- `main` 分支 `push` 成功后，出现一个手动 `deploy` 任务。
+- 测试阶段固定使用 `INGEST_BACKEND=memory`，因此不依赖 Redis 和 PostgreSQL。
+- 部署阶段按当前 README 的 Linux 运行方式，通过 SSH 登录服务器并重启 systemd 服务。
+
+### 部署阶段依赖的 GitLab CI/CD Variables
+
+在 GitLab 项目的 `Settings -> CI/CD -> Variables` 中配置：
+
+- `SSH_PRIVATE_KEY`：用于登录部署服务器的私钥，建议设为 Protected + Masked。
+- `DEPLOY_HOST`：部署目标服务器地址。
+- `DEPLOY_USER`：部署目标服务器用户。
+- `DEPLOY_PORT`：可选，默认 `22`。
+- `DEPLOY_PATH`：可选，默认 `/opt/OneTJ-Analytics`。
+
+### 服务器前置条件
+
+部署目标机需要满足以下条件：
+
+- 项目代码已存在于 `DEPLOY_PATH`，并且该目录是一个 Git 工作副本。
+- 服务器已按本文 Linux 部署章节准备好 `.env`、Python 运行环境、systemd 服务和 Nginx。
+- `DEPLOY_USER` 可以执行：
+  - `git fetch --all`
+  - `git checkout <commit_sha>`
+  - `.venv/bin/python -m pip install -r requirements.txt`
+  - `sudo systemctl restart onetj-analytics`
+  - `sudo systemctl restart onetj-analytics-worker`
+- 如果 `systemctl` 需要提权，建议为该用户配置免密码 sudo，否则 GitLab job 会卡在交互式密码输入。
+
+### 流水线部署动作
+
+手动触发 `deploy` 后，流水线会在服务器执行：
+
+```bash
+cd /opt/OneTJ-Analytics
+git fetch --all
+git checkout <当前流水线提交 SHA>
+python3 -m venv .venv   # 仅当 .venv 不存在时创建
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+sudo systemctl restart onetj-analytics
+sudo systemctl restart onetj-analytics-worker
+sudo systemctl --no-pager --full status onetj-analytics onetj-analytics-worker
+```
