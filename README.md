@@ -1,15 +1,17 @@
 # OneTJ Analytics 后端服务
 
-基于 FastAPI 的数据采集后端，用于 OneTJ 客户端集成测试。
+基于 FastAPI 的后端服务，用于 OneTJ 客户端集成测试，当前同时提供数据采集与版本更新检查能力。
 
 ## 功能说明
 
-- 仅提供 `POST /collector/v1/events` 接口。
+- 提供 `POST /collector/v1/events` 数据采集接口。
+- 提供 `GET /updater/v1/check` 自动更新检查接口。
 - 对请求 JSON 的字符串字段进行校验。
 - 对大部分字段执行去空白（trim）与非空校验。
 - `hashId` 为必填统计字段，缺失或空值直接返回 `400`
 - 统一响应格式：`status/code/message/request_id`。
 - 基于 IP 的限流（默认 `16 次/分钟/IP`）。
+- 更新检查基于仓库内 manifest 文件返回 Windows / Android 的最新版本信息。
 - 客户端 IP 解析规则：
   - 优先取 `X-Forwarded-For` 的第一个 IP。
   - 若无该头，则回退到直连客户端 IP。
@@ -24,6 +26,7 @@
 说明：
 
 - API 返回 `200` 表示请求已被接收（`redis` 模式下表示入队成功）。但不等于事件已写入数据库，落库由 worker 异步完成。
+- 更新检查接口为同步查询链路：`Updater API -> update_manifest.json -> JSON Response`。
 
 ## 本地环境准备（Windows PowerShell）
 
@@ -146,6 +149,7 @@ python -m app.worker
 
 - `INGEST_BACKEND=redis` 时，API 和 worker 需要同时运行。
 - `INGEST_BACKEND=memory` 时，仅内存暂存，不会写入数据库。
+- `GET /updater/v1/check` 不依赖 Redis 和 PostgreSQL，但服务启动时会校验 `UPDATE_MANIFEST_PATH` 指向的 manifest 文件。
 
 ## 运行测试
 
@@ -170,6 +174,8 @@ python -m pytest -q
 
 ## 请求示例
 
+### 采集请求
+
 ```bash
 curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
   -H "Content-Type: application/json; charset=utf-8" \
@@ -188,6 +194,22 @@ curl -X POST "http://127.0.0.1:8000/collector/v1/events" \
   }'
 ```
 
+### 更新检查请求
+
+Windows：
+
+```bash
+curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_version=2.2.4&current_build=11" \
+  -H "Accept: application/json"
+```
+
+Android：
+
+```bash
+curl "http://127.0.0.1:8000/updater/v1/check?platform=android&current_version=2.2.4&current_build=11" \
+  -H "Accept: application/json"
+```
+
 ## 最小端到端验证（确认落库）
 
 1. 启动 Redis、PostgreSQL、API、worker。
@@ -202,6 +224,34 @@ LIMIT 5;
 ```
 
 如果有新增记录，说明链路已打通。
+
+## 更新检查最小验证
+
+1. 确认 `config/update_manifest.json` 或 `.env` 中 `UPDATE_MANIFEST_PATH` 指向的 manifest 文件存在。
+2. 启动 API 服务。
+3. 发起一条更新检查请求：
+
+```bash
+curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_version=2.2.4&current_build=11"
+```
+
+期望返回：
+
+```json
+{
+  "status": "ok",
+  "code": "SUCCESS",
+  "message": "accepted",
+  "request_id": "xxx",
+  "data": {
+    "has_update": true,
+    "latest_version": "2.3.0",
+    "latest_build": 12,
+    "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
+    "sha256": "4f1f2d5a3e8c2f2b4e8aa56d32298f81f7fd46f0614b7fbf9360dbf6abf35f0f"
+  }
+}
+```
 
 ## 配置说明
 
@@ -222,6 +272,36 @@ LIMIT 5;
 - `BATCH_SIZE=500`：单次读取批量上限。
 - `FLUSH_INTERVAL_MS=100`：空轮询时休眠间隔（毫秒）。
 - `CONSUME_BLOCK_MS=1000`：`xreadgroup` 阻塞时间（毫秒）。
+- `UPDATER_RATE_LIMIT_PER_MINUTE=5`：更新检查接口每分钟每 IP 请求上限。
+- `UPDATE_MANIFEST_PATH=config/update_manifest.json`：更新清单文件路径，服务启动时会加载并校验。
+
+## 更新清单说明
+
+默认更新清单位于 `config/update_manifest.json`，按 `platform:arch` 组织版本信息：
+
+- Windows 使用如 `windows:x64` 的 key。
+- Android 默认使用 `android:default`。
+
+每个条目至少需要以下字段：
+
+- `latest_version`
+- `latest_build`
+- `download_url`
+- `sha256`
+
+可选字段：
+
+- `release_notes`
+- `published_at`
+- `mandatory`
+- `file_size`
+- `min_supported_version`
+
+约束：
+
+- `latest_version` / `min_supported_version` 需要是 `major.minor.patch` 格式。
+- `download_url` 必须是 HTTPS 地址。
+- `sha256` 必须是 64 位小写十六进制字符串。
 
 ## 常见误区
 
