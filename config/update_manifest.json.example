@@ -1,0 +1,24 @@
+{
+  "windows:x64": {
+    "latest_version": "2.3.0",
+    "latest_build": 12,
+    "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+    "published_at": "2026-03-20T08:00:00Z",
+    "mandatory": false,
+    "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
+    "sha256": "4f1f2d5a3e8c2f2b4e8aa56d32298f81f7fd46f0614b7fbf9360dbf6abf35f0f",
+    "file_size": 48235776,
+    "min_supported_version": "2.0.0"
+  },
+  "android:default": {
+    "latest_version": "2.3.0",
+    "latest_build": 12,
+    "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+    "published_at": "2026-03-20T08:00:00Z",
+    "mandatory": false,
+    "download_url": "https://download.example.com/onetj-2.3.0-12.apk",
+    "sha256": "8f1f2d5a3e8c2f2b4e8aa56d32298f81f7fd46f0614b7fbf9360dbf6abf35f0a",
+    "file_size": 38235776,
+    "min_supported_version": "2.0.0"
+  }
+}

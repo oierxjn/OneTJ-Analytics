@@ -17,5 +17,7 @@ class Settings(BaseSettings):
     batch_size: int = 500
     flush_interval_ms: int = 100
     consume_block_ms: int = 1000
+    updater_rate_limit_per_minute: int = 5
+    update_manifest_path: str = "config/update_manifest.json"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

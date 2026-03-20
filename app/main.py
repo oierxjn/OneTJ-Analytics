@@ -1,16 +1,21 @@
 import logging
+import time
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
 
 from app.config import Settings
 from app.ingest import EventEnvelope, EventProducer, build_event_producer
 from app.logging_utils import mask_sensitive_payload
 from app.middleware import CollectorMiddleware, get_client_ip
 from app.schemas import ApiResponse, EventIn
+from app.updater_repository import UpdateManifestRepository
+from app.updater_schemas import UpdateCheckQuery, UpdateCheckResponse
+from app.updater_service import UpdateCheckService
 
 logger = logging.getLogger("collector")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -32,12 +37,12 @@ def request_id_from(request: Request) -> str:
     return getattr(request.state, "request_id", "unknown")
 
 # 格式化请求验证错误消息
-def format_validation_message(exc: RequestValidationError) -> str:
+def format_validation_message(exc: RequestValidationError | ValidationError) -> str:
     first_error = exc.errors()[0]
     loc = first_error.get("loc", ())
     msg = first_error.get("msg", "invalid request")
     field = None
-    if len(loc) >= 2 and loc[0] == "body" and isinstance(loc[1], str):
+    if len(loc) >= 2 and loc[0] in {"body", "query"} and isinstance(loc[1], str):
         field = loc[1]
 
     normalized_msg = str(msg).lower()
@@ -58,7 +63,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         producer = build_event_producer(settings)
+        update_manifest_repository = UpdateManifestRepository(settings.update_manifest_path)
+        update_manifest_repository.load()
         app.state.event_producer = producer
+        app.state.update_service = UpdateCheckService(update_manifest_repository)
         try:
             yield
         finally:
@@ -116,6 +124,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             mask_sensitive_payload(payload.model_dump(exclude_none=True)),
         )
         return ApiResponse(status="ok", code="SUCCESS", message="accepted", request_id=request_id)
+
+    @app.get("/updater/v1/check", response_model=UpdateCheckResponse, response_model_exclude_none=True)
+    async def check_update(
+        request: Request,
+        platform: Literal["windows", "android"] = Query(...),
+        arch: str | None = Query(default=None),
+        current_version: str = Query(...),
+        current_build: str = Query(...),
+    ) -> UpdateCheckResponse:
+        request_id = request_id_from(request)
+        started_at = time.perf_counter()
+        update_service: UpdateCheckService = request.app.state.update_service
+
+        try:
+            query = UpdateCheckQuery(
+                platform=platform,
+                arch=arch,
+                current_version=current_version,
+                current_build=current_build,
+            )
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=format_validation_message(exc)) from exc
+
+        try:
+            data = update_service.check(query)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        logger.info(
+            "update check request_id=%s platform=%s arch=%s current_version=%s current_build=%s has_update=%s latency_ms=%s",
+            request_id,
+            query.platform,
+            query.arch or "",
+            query.current_version,
+            query.current_build,
+            data.has_update,
+            elapsed_ms,
+        )
+        return UpdateCheckResponse(
+            status="ok",
+            code="SUCCESS",
+            message="accepted",
+            request_id=request_id,
+            data=data,
+        )
 
     return app
 

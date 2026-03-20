@@ -66,21 +66,27 @@ class CollectorMiddleware(BaseHTTPMiddleware):
             return error_response(413, "PAYLOAD_TOO_LARGE", "payload too large", request_id)
 
         ip = get_client_ip(request)
-        if not self._allow_request(ip):
+        limit = self._rate_limit_for(request)
+        if not self._allow_request(f"{request.url.path}:{ip}", limit):
             return error_response(429, "RATE_LIMITED", "rate limit exceeded", request_id)
 
         response = await call_next(request)
         return response
 
-    def _allow_request(self, ip: str) -> bool:
+    def _rate_limit_for(self, request: Request) -> int:
+        if request.url.path == "/updater/v1/check":
+            return self.settings.updater_rate_limit_per_minute
+        return self.settings.rate_limit_per_minute
+
+    def _allow_request(self, key: str, limit: int) -> bool:
         now = time.time()
         lower_bound = now - 60
         with self.lock:
-            request_window = self.window_by_ip[ip]
+            request_window = self.window_by_ip[key]
             while request_window and request_window[0] <= lower_bound:
                 request_window.popleft()
 
-            if len(request_window) >= self.settings.rate_limit_per_minute:
+            if len(request_window) >= limit:
                 return False
 
             request_window.append(now)
