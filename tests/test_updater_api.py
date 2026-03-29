@@ -1,5 +1,6 @@
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -11,7 +12,7 @@ def create_client(updater_rate_limit_per_minute: int = 30) -> Generator[TestClie
     app = create_app(
         Settings(
             updater_rate_limit_per_minute=updater_rate_limit_per_minute,
-            update_manifest_path="config/update_manifest.json",
+            update_manifest_path=str(Path("config/update_manifest.json.example")),
         )
     )
     with TestClient(app) as client:
