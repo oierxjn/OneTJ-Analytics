@@ -1,0 +1,22 @@
+{
+  "entries": {
+    "windows:x64": {
+      "version": "2.3.0",
+      "build": 12,
+      "artifact_path": "../dist/OneTJSetup_2.3.0_12.exe",
+      "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
+      "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+      "mandatory": false,
+      "min_supported_version": "2.0.0"
+    },
+    "android:default": {
+      "version": "2.3.0",
+      "build": 12,
+      "artifact_path": "../dist/onetj-2.3.0-12.apk",
+      "download_url": "https://download.example.com/onetj-2.3.0-12.apk",
+      "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+      "mandatory": false,
+      "min_supported_version": "2.0.0"
+    }
+  }
+}

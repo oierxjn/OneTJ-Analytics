@@ -303,6 +303,42 @@ curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_v
 - `download_url` 必须是 HTTPS 地址。
 - `sha256` 必须是 64 位小写十六进制字符串。
 
+### 用脚本生成 manifest
+
+可以把发布元数据写到一个 JSON 规格文件里，再由脚本自动计算 `sha256` 和 `file_size`，生成最终的 `config/update_manifest.json`：
+
+```json
+{
+  "entries": {
+    "windows:x64": {
+      "version": "2.3.0",
+      "build": 12,
+      "artifact_path": "dist/OneTJSetup_2.3.0_12.exe",
+      "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
+      "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+      "mandatory": false,
+      "min_supported_version": "2.0.0"
+    }
+  }
+}
+```
+
+执行命令：
+
+```bash
+python scripts/generate_update_manifest.py --spec config/release_spec.json --output config/update_manifest.json --pretty
+```
+
+可以先从 [config/release_spec.json.example](E:\Program\OneTJ-Analytics\config\release_spec.json.example) 复制一份作为你的发布输入文件。
+
+脚本会自动：
+
+- 读取每个条目的 `artifact_path`
+- 计算产物的 `sha256`
+- 读取产物大小填充 `file_size`
+- 如果未提供 `published_at`，自动写入脚本执行时的当前 UTC 时间
+- 用现有 Pydantic 模型校验生成结果是否合法
+
 ## 常见误区
 
 - 只启动 API 不启动 worker（且 `INGEST_BACKEND=redis`）时，消息会在 Redis 中积压。
