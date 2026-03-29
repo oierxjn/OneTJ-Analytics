@@ -315,7 +315,7 @@ curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_v
       "build": 12,
       "artifact_path": "dist/OneTJSetup_2.3.0_12.exe",
       "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
-      "release_notes": "1. 新增自动更新\n2. 修复登录状态问题",
+      "release_notes_file": "../release-notes/windows-2.3.0.md",
       "mandatory": false,
       "min_supported_version": "2.0.0"
     }
@@ -326,7 +326,7 @@ curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_v
 执行命令：
 
 ```bash
-python scripts/generate_update_manifest.py --spec config/release_spec.json --output config/update_manifest.json --pretty
+python scripts/generate_update_manifest.py --spec config/release_spec.json --output config/update_manifest.json
 ```
 
 可以先从 [config/release_spec.json.example](E:\Program\OneTJ-Analytics\config\release_spec.json.example) 复制一份作为你的发布输入文件。
@@ -334,6 +334,8 @@ python scripts/generate_update_manifest.py --spec config/release_spec.json --out
 脚本会自动：
 
 - 读取每个条目的 `artifact_path`
+- 支持直接写 `release_notes`，也支持通过 `release_notes_file` 从 UTF-8 文本文件读取
+- `release_notes` 和 `release_notes_file` 不能同时设置
 - 计算产物的 `sha256`
 - 读取产物大小填充 `file_size`
 - 如果未提供 `published_at`，自动写入脚本执行时的当前 UTC 时间

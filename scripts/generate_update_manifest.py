@@ -1,9 +1,14 @@
 import argparse
 import hashlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.updater_schemas import UpdateManifest, UpdateManifestEntry
 
@@ -14,7 +19,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--spec",
-        required=True,
+        default="config/release_spec.json",
         help="Path to the release spec JSON file.",
     )
     parser.add_argument(
@@ -23,9 +28,9 @@ def parse_args() -> argparse.Namespace:
         help="Path to the generated manifest JSON file.",
     )
     parser.add_argument(
-        "--pretty",
+        "--compact",
         action="store_true",
-        help="Write formatted JSON with indentation.",
+        help="Write compact JSON without indentation.",
     )
     return parser.parse_args()
 
@@ -38,16 +43,37 @@ def compute_sha256(file_path: Path) -> str:
     return digest.hexdigest()
 
 
+def resolve_input_file(file_value: object, key: str, field_name: str, base_dir: Path) -> Path:
+    if not isinstance(file_value, str) or not file_value.strip():
+        raise ValueError(f"{key}.{field_name} must be a non-empty string")
+    file_path = Path(file_value)
+    if not file_path.is_absolute():
+        file_path = (base_dir / file_path).resolve()
+    if not file_path.is_file():
+        raise ValueError(f"{key}.{field_name} does not exist: {file_path}")
+    return file_path
+
+
+def resolve_release_notes(key: str, raw_entry: dict[str, Any], spec_dir: Path) -> str | None:
+    inline_notes = raw_entry.get("release_notes")
+    notes_file_value = raw_entry.get("release_notes_file")
+
+    if inline_notes is not None and notes_file_value is not None:
+        raise ValueError(f"{key} cannot set both release_notes and release_notes_file")
+    if inline_notes is not None:
+        if not isinstance(inline_notes, str) or not inline_notes.strip():
+            raise ValueError(f"{key}.release_notes must be a non-empty string")
+        return inline_notes.strip()
+    if notes_file_value is None:
+        return None
+
+    notes_file_path = resolve_input_file(notes_file_value, key, "release_notes_file", spec_dir)
+    return notes_file_path.read_text(encoding="utf-8").strip()
+
+
 def build_entry(key: str, raw_entry: dict[str, Any], spec_dir: Path) -> UpdateManifestEntry:
     artifact_value = raw_entry.get("artifact_path")
-    if not isinstance(artifact_value, str) or not artifact_value.strip():
-        raise ValueError(f"{key}.artifact_path must be a non-empty string")
-
-    artifact_path = Path(artifact_value)
-    if not artifact_path.is_absolute():
-        artifact_path = (spec_dir / artifact_path).resolve()
-    if not artifact_path.is_file():
-        raise ValueError(f"{key}.artifact_path does not exist: {artifact_path}")
+    artifact_path = resolve_input_file(artifact_value, key, "artifact_path", spec_dir)
 
     latest_version = raw_entry.get("version")
     latest_build = raw_entry.get("build")
@@ -69,8 +95,11 @@ def build_entry(key: str, raw_entry: dict[str, Any], spec_dir: Path) -> UpdateMa
         "published_at": normalize_published_at(raw_entry.get("published_at")),
     }
 
+    release_notes = resolve_release_notes(key, raw_entry, spec_dir)
+    if release_notes is not None:
+        entry_payload["release_notes"] = release_notes
+
     optional_mapping = {
-        "release_notes": "release_notes",
         "mandatory": "mandatory",
         "min_supported_version": "min_supported_version",
     }
@@ -122,7 +151,13 @@ def main() -> None:
     manifest = generate_manifest(spec_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="\n") as fp:
-        json.dump(manifest.model_dump(mode="json")["entries"], fp, ensure_ascii=False, indent=2 if args.pretty else None)
+        json.dump(
+            manifest.model_dump(mode="json")["entries"],
+            fp,
+            ensure_ascii=False,
+            indent=None if args.compact else 2,
+            separators=(",", ": ") if args.compact else None,
+        )
         fp.write("\n")
 
 

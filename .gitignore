@@ -7,3 +7,5 @@ __pycache__/
 .env
 config/update_manifest.json
 config/release_spec.json
+dist/
+release-notes/
