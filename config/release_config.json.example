@@ -1,0 +1,18 @@
+{
+  "_comment_repo": "OneTJ 客户端仓库路径（本地目录或 git 克隆目录）",
+  "repo": "E:/Program/FlutterProgram/onetj",
+  "_comment_collect_dir": "构建产物收集目录（相对本项目根目录或绝对路径）",
+  "collect_dir": "dist",
+  "_comment_download_base": "客户端下载基址，脚本将拼接 <base>/<产物文件名> 生成 download_url",
+  "download_base": "https://example.com/downloads",
+  "_comment_iscc": "Inno Setup 编译器 ISCC.exe 路径；留空则自动探测 PATH 与标准安装目录",
+  "iscc": "C:/Program Files (x86)/Inno Setup 6/ISCC.exe",
+  "_comment_release_notes_file": "本次发布更新说明文本文件（UTF-8）",
+  "release_notes_file": "release-notes/release.md",
+  "_comment_min_supported_version": "最低支持版本 major.minor.patch",
+  "min_supported_version": "2.0.0",
+  "_comment_output_manifest": "生成的 update_manifest.json 输出路径",
+  "output_manifest": "config/update_manifest.json",
+  "_comment_publish_remote": "可选：--publish 时的 scp 目标，形如 user@host:/path/to/downloads；留空则 --publish 报错",
+  "publish_remote": ""
+}

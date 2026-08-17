@@ -303,19 +303,54 @@ curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_v
 - `download_url` 必须是 HTTPS 地址。
 - `sha256` 必须是 64 位小写十六进制字符串。
 
-### 用脚本生成 manifest
+### 生成 update_manifest.json（底层工具）
 
-可以把发布元数据写到一个 JSON 规格文件里，再由脚本自动计算 `sha256` 和 `file_size`，生成最终的 `config/update_manifest.json`：
+日常发布请直接使用下一节的 `scripts/build_release.py`（自动构建 + 收集产物 + 生成 manifest，无需手工维护任何规格文件）。这里保留的 `scripts/generate_update_manifest.py` 是底层工具：接收一份「发布规格 JSON」（临时文件或程序生成均可），自动计算 `sha256` / `file_size` 并产出 `config/update_manifest.json`。
+
+执行命令：
+
+```bash
+python scripts/generate_update_manifest.py --spec <发布规格JSON路径> --output config/update_manifest.json
+```
+
+发布规格 JSON 的顶层结构为 `entries` 对象，key 为 `<platform>:<arch>`（Windows 用 `windows:x64`，Android 用 `android:default`），value 为发布条目：
+
+| 字段 | 必填 | 类型 | 说明 |
+|---|---|---|---|
+| `version` | ✅ | string | 版本号，`major.minor.patch` 格式，如 `2.5.0` |
+| `build` | ✅ | integer | 构建号，如 `18` |
+| `artifact_path` | ✅ | string | 产物文件路径；相对路径基于 spec 文件所在目录解析 |
+| `download_url` | ✅ | string | 客户端下载地址，必须为 HTTPS；文件名需与产物命名规则一致 |
+| `release_notes` / `release_notes_file` | 可选 | string | 更新说明；二选一，**不能同时设置**；`release_notes_file` 指向 UTF-8 文本文件 |
+| `mandatory` | 可选 | boolean | 是否强制更新 |
+| `min_supported_version` | 可选 | string | 最低支持版本，`major.minor.patch` 格式 |
+| `published_at` | 可选 | string | 发布时间；缺省时脚本自动写入当前 UTC 时间 |
+
+产物命名规则（脚本在收集 / 推演时按此生成文件名，`download_url` 的文件名必须与之一致）：
+
+- Windows：`OneTJSetup_windows_<version>_<build>.exe`
+- Android：`OneTJ_release_<version>_<build>.APK`
+
+双平台完整示例：
 
 ```json
 {
   "entries": {
     "windows:x64": {
-      "version": "2.3.0",
-      "build": 12,
-      "artifact_path": "dist/OneTJSetup_2.3.0_12.exe",
-      "download_url": "https://download.example.com/OneTJSetup_2.3.0_12.exe",
-      "release_notes_file": "../release-notes/windows-2.3.0.md",
+      "version": "2.5.0",
+      "build": 18,
+      "artifact_path": "dist/OneTJSetup_windows_2.5.0_18.exe",
+      "download_url": "https://onetjapi.example.com/downloads/OneTJSetup_windows_2.5.0_18.exe",
+      "release_notes_file": "../release-notes/release.md",
+      "mandatory": false,
+      "min_supported_version": "2.0.0"
+    },
+    "android:default": {
+      "version": "2.5.0",
+      "build": 18,
+      "artifact_path": "dist/OneTJ_release_2.5.0_18.APK",
+      "download_url": "https://onetjapi.example.com/downloads/OneTJ_release_2.5.0_18.APK",
+      "release_notes_file": "../release-notes/release.md",
       "mandatory": false,
       "min_supported_version": "2.0.0"
     }
@@ -323,13 +358,18 @@ curl "http://127.0.0.1:8000/updater/v1/check?platform=windows&arch=x64&current_v
 }
 ```
 
-执行命令：
+与 `update_manifest.json` 的字段映射：
 
-```bash
-python scripts/generate_update_manifest.py --spec config/release_spec.json --output config/update_manifest.json
-```
-
-可以先从 [config/release_spec.json.example](E:\Program\OneTJ-Analytics\config\release_spec.json.example) 复制一份作为你的发布输入文件。
+| 发布规格 JSON | update_manifest.json | 说明 |
+|---|---|---|
+| `version` | `latest_version` | 由脚本搬运 |
+| `build` | `latest_build` | 由脚本搬运 |
+| `download_url` | `download_url` | 由脚本搬运 |
+| —（脚本计算） | `sha256`、`file_size` | 基于 `artifact_path` 计算 |
+| `release_notes` / `release_notes_file` | `release_notes` | 由脚本搬运 / 读取 |
+| `published_at` | `published_at` | 缺省时脚本自动生成 |
+| `mandatory` | `mandatory` | 由脚本搬运 |
+| `min_supported_version` | `min_supported_version` | 由脚本搬运 |
 
 脚本会自动：
 
@@ -340,6 +380,48 @@ python scripts/generate_update_manifest.py --spec config/release_spec.json --out
 - 读取产物大小填充 `file_size`
 - 如果未提供 `published_at`，自动写入脚本执行时的当前 UTC 时间
 - 用现有 Pydantic 模型校验生成结果是否合法
+
+### 一键构建 + 生成 manifest（build_release.py）
+
+[scripts/build_release.py](E:\Program\OneTJ-Analytics\scripts\build_release.py) 把「构建 OneTJ 客户端 -> 收集产物 -> 生成 manifest」整条链路自动化。**`release_spec.json` 已退役**：版本读自仓库 `pubspec.yaml`，产物路径 / 文件名 / 下载地址按约定推导，发布输入只剩少量参数。
+
+**直接执行即真实构建**（默认行为），flutter 一律通过 **fvm** 调用；默认读取 [config/release_config.json](E:\Program\OneTJ-Analytics\config\release_config.json) 提供默认值，命令行 flag 优先：
+
+```bash
+python scripts/build_release.py \
+    --repo <OneTJ仓库路径> \                     # 缺省取配置 repo 字段
+    --platform windows,android \                 # 默认全部
+    [--version 2.5.0+18] \                      # 缺省读 pubspec
+    [--download-base https://host/downloads] \  # 缺省取配置 download_base
+    [--iscc <ISCC.exe路径>] \                    # 缺省自动探测
+    [--mandatory] [--min-supported 2.0.0]
+```
+
+执行流程：`fvm flutter build windows --release` -> ISCC 打包安装包 -> `fvm flutter build apk --release` -> 收集并重命名产物到 `dist/` -> 生成 `update_manifest.json`（sha256 / file_size 自动计算并校验）-> 结束。
+
+常用附加参数：
+
+- `--skip-build`：跳过 flutter / ISCC 构建，直接收集已有产物并生成 manifest（复用旧产物 / 快速验证收尾流程）；
+- `--publish`：生成 manifest 后把产物 scp 发布到下载服务器（需配置 `publish_remote` 或传 `--publish-remote`）；
+- `--dry-run`：发布前预览——只做只读检查与路径推演，不执行构建 / 复制 / 写文件（默认不加该参数时直接真实构建）。
+
+每次执行前会做同样的检查并输出：
+
+- **版本**：读自 OneTJ 仓库 `pubspec.yaml` 的 `version: <x.y.z>+<build>`（可用 `--version` 覆盖）；
+- **发布配置**：下载基址、强制更新、最低支持版本、release notes、输出 manifest 路径；
+- **工具链**：检查 `fvm` 与 `ISCC`（Inno Setup 编译器，用于 Windows 安装包打包）是否可用，支持 `--iscc` 显式指定；
+- **setup.iss**：核对 `AppVersion` 与 pubspec 版本是否一致（发布前请先运行 OneTJ 仓库自带的版本同步脚本）；
+- **Android 签名**：确认 `android/key.properties` 与 keystore 文件存在（脚本不会读取 / 打印其中的明文口令）；
+- **产物推演**：各平台的最终产物文件名与下载地址（如 `OneTJSetup_windows_2.5.0_18.exe`、`OneTJ_release_2.5.0_18.APK`），并检查产物目录中已存在的旧文件；
+- **现网 manifest 对比**：对比 `config/update_manifest.json` 当前版本与本次发布版本（升级 / 持平 / 新增）。
+
+发布配置（模板见 [config/release_config.json.example](E:\Program\OneTJ-Analytics\config\release_config.json.example)）：`repo`、`collect_dir`、`download_base`、`iscc`、`release_notes_file`、`min_supported_version`、`output_manifest`，可选 `publish_remote`（`--publish` 时的 scp 目标）。
+
+本脚本的单测：
+
+```bash
+python -m pytest tests/test_build_release.py -q
+```
 
 ## 常见误区
 

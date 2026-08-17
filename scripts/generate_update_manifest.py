@@ -126,21 +126,30 @@ def load_spec(spec_path: Path) -> dict[str, Any]:
     return payload
 
 
-def generate_manifest(spec_path: Path) -> UpdateManifest:
-    payload = load_spec(spec_path)
+def generate_manifest_from_dict(payload: dict[str, Any], base_dir: Path) -> UpdateManifest:
+    """从内存 dict 生成 manifest（供 build_release.py 等程序化调用）。
+
+    :param payload: 与 spec JSON 文件相同的结构，形如 {"entries": {...}}
+    :param base_dir: 相对路径（artifact_path / release_notes_file）的解析基准目录
+    """
     entries_value = payload.get("entries")
     if not isinstance(entries_value, dict) or not entries_value:
         raise ValueError("spec.entries must be a non-empty object")
 
-    spec_dir = spec_path.parent.resolve()
     manifest_entries: dict[str, UpdateManifestEntry] = {}
     for key, raw_entry in entries_value.items():
         if not isinstance(key, str):
             raise ValueError("spec.entries keys must be strings")
         if not isinstance(raw_entry, dict):
             raise ValueError(f"{key} entry must be a JSON object")
-        manifest_entries[key] = build_entry(key, raw_entry, spec_dir)
+        manifest_entries[key] = build_entry(key, raw_entry, base_dir)
     return UpdateManifest(entries=manifest_entries)
+
+
+def generate_manifest(spec_path: Path) -> UpdateManifest:
+    """从 spec JSON 文件生成 manifest（底层工具入口）。"""
+    payload = load_spec(spec_path)
+    return generate_manifest_from_dict(payload, spec_path.parent.resolve())
 
 
 def main() -> None:
