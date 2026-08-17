@@ -402,7 +402,9 @@ python scripts/build_release.py \
 常用附加参数：
 
 - `--skip-build`：跳过 flutter / ISCC 构建，直接收集已有产物并生成 manifest（复用旧产物 / 快速验证收尾流程）；
-- `--publish`：生成 manifest 后把产物 scp 发布到下载服务器（需配置 `publish_remote` 或传 `--publish-remote`）；
+- `--publish`：完整发布——产物 scp 到 `<publish_dir>/downloads/`、manifest / config 文件 scp 到 `<publish_dir>/config/`（子目录由脚本自动推导）；
+- `--reload-api`：发布后通过 SSH 执行 `reload_cmd`（如 `sudo systemctl restart onetj-analytics`）重新加载 manifest；
+- `--publish-remote` / `--publish-config-dir` / `--reload-cmd`：均可覆盖配置文件对应字段；
 - `--dry-run`：发布前预览——只做只读检查与路径推演，不执行构建 / 复制 / 写文件（默认不加该参数时直接真实构建）。
 
 每次执行前会做同样的检查并输出：
@@ -415,31 +417,38 @@ python scripts/build_release.py \
 - **产物推演**：各平台的最终产物文件名与下载地址（如 `OneTJSetup_windows_2.5.0_18.exe`、`OneTJ_release_2.5.0_18.APK`），并检查产物目录中已存在的旧文件；
 - **现网 manifest 对比**：对比 `config/update_manifest.json` 当前版本与本次发布版本（升级 / 持平 / 新增）。
 
-发布配置（模板见 [config/release_config.json.example](E:\Program\OneTJ-Analytics\config\release_config.json.example)）：`repo`、`collect_dir`、`download_base`、`iscc`、`release_notes_file`、`min_supported_version`、`output_manifest`，可选 `publish_remote`（`--publish` 时的 scp 目标）。
+发布配置（模板见 [config/release_config.json.example](E:\Program\OneTJ-Analytics\config\release_config.json.example)）：`repo`、`collect_dir`、`download_base`、`iscc`、`release_notes_file`、`min_supported_version`、`output_manifest`，发布相关可选字段：`publish_dir`（服务器项目部署目录，脚本自动推导 `downloads/` 与 `config/` 子目录）、`reload_cmd`（`--reload-api` 时执行）、`publish_ignore`（发布时跳过的 config 文件，默认 `.env`）。
 
 ### 下载文件路由（Nginx `/downloads/`）
 
 客户端更新包的下载地址由三段组成，缺一不可：
 
 `download_url = https://<域名>/downloads/<产物文件名>`
-              └── download_base ──┘      └── publish_remote 对应目录中的文件 ──┘
+              └── download_base ──┘      └── publish_dir/downloads 中的文件 ──┘
 
 - **`download_base`**（配置）：`https://<域名>/downloads`，对应服务器 Nginx 的 `/downloads/` 路由；
-- **Nginx 路由**（服务器配置，需手工维护）：把 `/downloads/` 映射到物理目录 `/srv/onetj-downloads/`：
+- **Nginx 路由**（服务器配置，需手工维护）：把 `/downloads/` 映射到物理目录 `/opt/OneTJ-Analytics/downloads/`：
   ```nginx
   location /downloads/ {
-      alias /srv/onetj-downloads/;
+      alias /opt/OneTJ-Analytics/downloads/;
       add_header Content-Disposition "attachment";   # 强制下载，避免浏览器直接打开
       types {
           application/vnd.android.package-archive apk;   # APK 正确的 MIME
       }
   }
   ```
-- **`publish_remote`**（配置）：`user@host:/srv/onetj-downloads`——即上面 `alias` 指向的**物理目录**（不是项目部署目录），`--publish` 时产物会被 scp 到这里。
+- **`publish_dir`**（配置）：`user@host:/opt/OneTJ-Analytics`——服务器项目部署目录。脚本自动推导：产物 scp 到 `<publish_dir>/downloads/`（即上面 `alias` 指向的物理目录），manifest / config scp 到 `<publish_dir>/config/`（API 运行目录）。注意 `.env` 默认被忽略，避免把本地密钥传到服务器。
 
-发布链路：`--publish`（默认即真实构建；已构建过可加 `--skip-build` 复用产物）-> 产物收集到 `dist/` -> 生成 manifest -> scp 到 `/srv/onetj-downloads/` -> 客户端通过 `https://<域名>/downloads/<文件名>` 下载。
+完整发布链路（`--publish`，可选 `--reload-api`；默认即真实构建，已构建过可加 `--skip-build` 复用产物）：
 
-提示：物理目录名（`/srv/onetj-downloads`）是示例，请以服务器上实际 `nginx -T` 查到的 `alias` 为准。
+```
+Dist 收集 -> 产物 scp 到 /opt/OneTJ-Analytics/downloads/
+         -> manifest + config scp 到 /opt/OneTJ-Analytics/config/
+         -> [--reload-api] ssh 执行 reload_cmd（如 systemctl restart onetj-analytics）加载新 manifest
+         -> 客户端 GET /updater/v1/check 返回新版本
+```
+
+提示：物理目录名（`/opt/OneTJ-Analytics/downloads`）与 Nginx 路由（`location /downloads/ { alias /opt/OneTJ-Analytics/downloads/; }`）是示例，请以服务器上实际 `nginx -T` 查到的 `alias` 为准，并确认 API 实际读取 `config/update_manifest.json`。
 
 
 ## 常见误区

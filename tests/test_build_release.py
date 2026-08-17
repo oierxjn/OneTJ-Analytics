@@ -435,3 +435,105 @@ def test_build_plan_missing_pubspec():
             br.build_plan(root / "nope-repo", None, ["android"], _release_cfg(root))
     finally:
         _cleanup(root)
+
+
+# ---------------------------------------------------------------------------
+# 发布：产物 + manifest/config + reload
+# ---------------------------------------------------------------------------
+
+def test_publish_artifacts_ships_artifacts_and_config(monkeypatch):
+    root = _tmp_dir("pub")
+    try:
+        repo = _make_fake_repo(root)
+        cfg = _release_cfg(root)
+        cfg_dir = cfg.output_manifest.parent  # root/manifest.json 的父目录
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "update_manifest.json").write_text('{"k":1}', encoding="utf-8")
+        (cfg_dir / ".env").write_text("SECRET=1", encoding="utf-8")
+        (cfg_dir / "release_config.json").write_text("{}", encoding="utf-8")
+        plan = br.build_plan(repo, None, ["android"], cfg)
+        # 造一个产物
+        for pp in plan.platforms:
+            pp.final_artifact.parent.mkdir(parents=True, exist_ok=True)
+            pp.final_artifact.write_bytes(b"artifact")
+
+        calls = []
+        monkeypatch.setattr(br, "_run_cmd", lambda cmd, cwd, label: calls.append((cmd, label)))
+
+        br.publish_artifacts(plan, "root@host:/opt/OneTJ-Analytics", ".env")
+
+        published = "\n".join(c for c, _ in calls)
+        # 产物 scp 到 <publish_dir>/downloads/
+        assert "scp" in published and "OneTJ_release_2.5.0_18.APK" in published
+        assert "root@host:/opt/OneTJ-Analytics/downloads/" in published
+        # manifest + release_config 发布到 <publish_dir>/config/
+        assert "root@host:/opt/OneTJ-Analytics/config/" in published
+        assert "update_manifest.json" in published
+        assert "release_config.json" in published
+        # .env 不应有 scp 命令、无目标
+        assert "config/.env" not in published
+    finally:
+        _cleanup(root)
+
+
+def test_reload_api_skips_without_cmd(monkeypatch):
+    root = _tmp_dir("reload")
+    try:
+        repo = _make_fake_repo(root)
+        cfg = _release_cfg(root, reload_cmd=None)
+        plan = br.build_plan(repo, None, ["android"], cfg)
+        calls = []
+        monkeypatch.setattr(br, "_run_cmd", lambda cmd, cwd, label: calls.append(label))
+        br.reload_api(plan, None, "host")
+        assert calls == [], "无 reload_cmd 时不应执行任何命令"
+    finally:
+        _cleanup(root)
+
+
+def test_reload_api_runs_cmd(monkeypatch):
+    root = _tmp_dir("reload2")
+    try:
+        repo = _make_fake_repo(root)
+        cfg = _release_cfg(root, reload_cmd="sudo systemctl restart onetj-analytics")
+        plan = br.build_plan(repo, None, ["android"], cfg)
+        calls = []
+        monkeypatch.setattr(br, "_run_cmd", lambda cmd, cwd, label: calls.append(cmd))
+        br.reload_api(plan, cfg.reload_cmd, "root@host")
+        assert calls and "ssh root@host" in calls[0] and "systemctl restart" in calls[0]
+    finally:
+        _cleanup(root)
+
+
+def test_run_release_publish_wires_reload(monkeypatch):
+    root = _tmp_dir("rel")
+    try:
+        repo = _make_fake_repo(root)
+        cfg = _release_cfg(
+            root,
+            publish_dir="root@host:/opt/OneTJ-Analytics",
+            reload_cmd="sudo systemctl restart onetj-analytics",
+        )
+        plan = br.build_plan(repo, None, ["android"], cfg)
+        for pp in plan.platforms:
+            if pp.raw_artifact is not None and not pp.raw_artifact.is_file():
+                pp.raw_artifact.write_bytes(b"x")
+            if pp.final_artifact.parent:
+                pass
+        cfg_dir = cfg.output_manifest.parent
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        (cfg_dir / "update_manifest.json").write_text("{}", encoding="utf-8")
+        # generate_manifest_from_dict 要求 release_notes_file 真实存在
+        (root / "notes.md").write_text("更新说明", encoding="utf-8")
+
+        calls = []
+        monkeypatch.setattr(br, "_run_cmd", lambda cmd, cwd, label: calls.append(label))
+        # fvm 标记为已找到，跳过 build；collect 用已有的 raw_artifact
+        plan.tools[0]["found"] = True
+        plan.build_cmds = [] if not hasattr(plan, 'build_cmds') else [p.build_cmds for p in plan.platforms]
+        rc = br.run_release(plan, skip_build=True, publish=True, reload_api_flag=True)
+        assert rc == 0
+        labels = " ".join(calls)
+        assert "发布" in labels and "重载 API" in labels
+    finally:
+        _cleanup(root)
+

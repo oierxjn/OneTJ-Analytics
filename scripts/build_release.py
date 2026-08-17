@@ -86,7 +86,9 @@ class ReleaseConfig:
     mandatory: bool
     min_supported_version: str | None
     output_manifest: Path
-    publish_remote: str | None = None
+    publish_dir: str | None = None  # 服务器项目部署目录，如 user@host:/opt/OneTJ-Analytics；派生子目录 downloads/ 与 config/
+    reload_cmd: str | None = None  # 发布后执行的 API 重载命令
+    publish_ignore: str | None = None  # 发布时跳过列出的文件（逗号分隔，如 '.env'）
 
 
 def parse_pubspec_version(text: str) -> VersionInfo:
@@ -627,15 +629,44 @@ def write_manifest_file(payload: dict[str, Any], output_path: Path) -> Path:
     return output_path
 
 
-def publish_artifacts(plan: BuildPlan, remote: str) -> None:
-    """把收集到的产物 scp 到发布服务器（remote 形如 user@host:/下载目录）。"""
+def publish_artifacts(plan: BuildPlan, publish_dir: str, ignore: str) -> None:
+    """发布产物到 <publish_dir>/downloads/，manifest 及 config 到 <publish_dir>/config/。"""
+    base = publish_dir.rstrip("/")
+
+    # 1) 产物 -> <publish_dir>/downloads/
+    dl = f"{base}/downloads"
     for pp in plan.platforms:
-        cmd = f'scp "{pp.final_artifact}" {remote}/'
+        cmd = f'scp "{pp.final_artifact}" {dl}/'
         _run_cmd(cmd, PROJECT_ROOT, f"发布 {pp.key}")
         print(f"  已发布，核对 URL: {pp.download_url}", flush=True)
 
+    # 2) manifest + config -> <publish_dir>/config/
+    ignore_names = {n.strip() for n in ignore.split(",") if n.strip()}
+    cfg_dir = plan.release_cfg.output_manifest.parent
+    for name in sorted(p.name for p in cfg_dir.iterdir() if p.is_file()):
+        if name in ignore_names:
+            print(f"  跳过发布（忽略）: config/{name}", flush=True)
+            continue
+        f = cfg_dir / name
+        cmd = f'scp "{f}" {base}/config/'
+        _run_cmd(cmd, PROJECT_ROOT, f"发布 config/{name}")
+    print(f"  已发布 manifest 到: {base}/config/", flush=True)
 
-def run_release(plan: BuildPlan, skip_build: bool, publish: bool) -> int:
+
+def reload_api(plan: BuildPlan, reload_cmd: str | None, host: str | None) -> None:
+    """在服务器上执行 API 重载命令。"""
+    if not reload_cmd:
+        print("  未配置 reload_cmd，跳过 API 重载（请手动重启 API 以加载新 manifest）", flush=True)
+        return
+    if not host:
+        print("  未配置 SSH host（从 publish_dir 解析失败），跳过 API 重载", flush=True)
+        return
+    cmd = f'ssh {host} "{reload_cmd}"'
+    _run_cmd(cmd, PROJECT_ROOT, "重载 API")
+    print(f"  API 已重载: {reload_cmd}", flush=True)
+
+
+def run_release(plan: BuildPlan, skip_build: bool, publish: bool, reload_api_flag: bool) -> int:
     print("==== OneTJ 发布构建（真实模式）====")
     print(f"仓库: {plan.repo}")
     print(f"版本: {plan.version.version_name}+{plan.version.build_number}")
@@ -666,10 +697,13 @@ def run_release(plan: BuildPlan, skip_build: bool, publish: bool) -> int:
 
     # 4) 发布（可选）
     if publish:
-        remote = plan.release_cfg.publish_remote or ""
-        if not remote:
-            raise RuntimeError("--publish 需要配置 publish_remote（user@host:/path）")
-        publish_artifacts(plan, remote)
+        publish_dir = plan.release_cfg.publish_dir or ""
+        if not publish_dir:
+            raise RuntimeError("--publish 需要配置 publish_dir（user@host:/opt/OneTJ-Analytics）")
+        publish_artifacts(plan, publish_dir, plan.release_cfg.publish_ignore or ".env")
+        if reload_api_flag:
+            host = publish_dir.rsplit(":", 1)[0]
+            reload_api(plan, plan.release_cfg.reload_cmd, host)
 
     print("==== 发布构建完成 ====")
     return 0
@@ -696,7 +730,10 @@ def render_plan(plan: BuildPlan) -> str:
     L.append(f"  最低支持版本    : {plan.release_cfg.min_supported_version or '（未配置）'}")
     L.append(f"  release notes   : {plan.release_cfg.release_notes_file or '（未配置）'}")
     L.append(f"  输出 manifest   : {plan.release_cfg.output_manifest}")
-    L.append(f"  发布目标        : {plan.release_cfg.publish_remote or '（未配置，--publish 不可用）'}")
+    L.append(f"  发布目标        : {plan.release_cfg.publish_dir or '（未配置，--publish 不可用）'}")
+    if plan.release_cfg.publish_dir:
+        L.append(f"    - 产物 -> {plan.release_cfg.publish_dir.rstrip('/')}/downloads/")
+        L.append(f"    - manifest/config -> {plan.release_cfg.publish_dir.rstrip('/')}/config/")
 
     L.append("\n[工具链]")
     for t in plan.tools:
@@ -787,12 +824,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--publish",
         action="store_true",
-        help="生成 manifest 后把产物 scp 到发布服务器（需配置 publish_remote）",
+        help="完整发布：产物 scp 到 <publish_dir>/downloads/、manifest 到 <publish_dir>/config/（需配置 publish_dir）",
     )
     parser.add_argument(
-        "--publish-remote",
+        "--publish-dir",
         default=None,
-        help="下载目录（Nginx /downloads/ 映射的物理目录），形如 user@host:/opt/.../downloads；缺省取配置 publish_remote",
+        help="服务器项目部署目录，形如 user@host:/opt/OneTJ-Analytics；子目录 downloads/ 与 config/ 由脚本自动推导；缺省取配置 publish_dir",
+    )
+    parser.add_argument(
+        "--reload-cmd",
+        default=None,
+        help="--reload-api 时在服务器执行的命令（缺省取配置 reload_cmd）",
+    )
+    parser.add_argument(
+        "--publish-ignore",
+        default=None,
+        help="发布时跳过的 config 文件名（逗号分隔，如 '.env'；缺省取配置 publish_ignore 或 .env）",
+    )
+    parser.add_argument(
+        "--reload-api",
+        action="store_true",
+        help="发布后通过 SSH 执行 reload_cmd 以加载新 manifest",
     )
     parser.add_argument("--json", action="store_true", help="输出 JSON 报告")
     args = parser.parse_args(argv)
@@ -830,7 +882,9 @@ def main(argv: list[str] | None = None) -> int:
         mandatory=bool(pick(args.mandatory, "mandatory", False)),
         min_supported_version=pick(args.min_supported, "min_supported_version", None),
         output_manifest=output_manifest,
-        publish_remote=pick(args.publish_remote, "publish_remote", None),
+        publish_dir=pick(args.publish_dir, "publish_dir", None),
+        reload_cmd=pick(args.reload_cmd, "reload_cmd", None),
+        publish_ignore=pick(args.publish_ignore, "publish_ignore", ".env"),
     )
 
     try:
@@ -854,7 +908,12 @@ def main(argv: list[str] | None = None) -> int:
 
     # 默认：真实构建
     try:
-        return run_release(plan, skip_build=args.skip_build, publish=args.publish)
+        return run_release(
+            plan,
+            skip_build=args.skip_build,
+            publish=args.publish,
+            reload_api_flag=args.reload_api,
+        )
     except (RuntimeError, FileNotFoundError) as exc:
         print(f"[error] {exc}", file=sys.stderr)
         return 2

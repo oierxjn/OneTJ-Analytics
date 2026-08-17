@@ -13,6 +13,10 @@
   "min_supported_version": "2.0.0",
   "_comment_output_manifest": "生成的 update_manifest.json 输出路径",
   "output_manifest": "config/update_manifest.json",
-  "_comment_publish_remote": "可选：--publish 时的 scp 目标 = 下载服务器上 Nginx /downloads/ 映射的物理目录（不是项目根目录），形如 user@host:/opt/OneTJ-Analytics/downloads；留空则 --publish 报错",
-  "publish_remote": ""
+  "_comment_publish_dir": "可选：--publish 时的服务器项目部署目录，形如 user@host:/opt/OneTJ-Analytics；脚本自动推导子目录 downloads/（产物）与 config/（manifest）",
+  "publish_dir": "",
+  "_comment_reload_cmd": "可选：--reload-api 时在服务器上执行的 API 重载命令，如 sudo systemctl restart onetj-analytics",
+  "reload_cmd": "",
+  "_comment_publish_ignore": "可选：--publish 时不发布的文件名（逗号分隔），默认跳过 .env",
+  "publish_ignore": ".env"
 }
