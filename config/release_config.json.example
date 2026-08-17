@@ -13,6 +13,6 @@
   "min_supported_version": "2.0.0",
   "_comment_output_manifest": "生成的 update_manifest.json 输出路径",
   "output_manifest": "config/update_manifest.json",
-  "_comment_publish_remote": "可选：--publish 时的 scp 目标，形如 user@host:/path/to/downloads；留空则 --publish 报错",
+  "_comment_publish_remote": "可选：--publish 时的 scp 目标 = 下载服务器上 Nginx /downloads/ 映射的物理目录（不是项目根目录），形如 user@host:/opt/OneTJ-Analytics/downloads；留空则 --publish 报错",
   "publish_remote": ""
 }

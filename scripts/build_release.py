@@ -628,10 +628,11 @@ def write_manifest_file(payload: dict[str, Any], output_path: Path) -> Path:
 
 
 def publish_artifacts(plan: BuildPlan, remote: str) -> None:
-    """把收集到的产物 scp 到发布服务器（remote 形如 user@host:/path）。"""
+    """把收集到的产物 scp 到发布服务器（remote 形如 user@host:/下载目录）。"""
     for pp in plan.platforms:
         cmd = f'scp "{pp.final_artifact}" {remote}/'
         _run_cmd(cmd, PROJECT_ROOT, f"发布 {pp.key}")
+        print(f"  已发布，核对 URL: {pp.download_url}", flush=True)
 
 
 def run_release(plan: BuildPlan, skip_build: bool, publish: bool) -> int:
@@ -695,6 +696,7 @@ def render_plan(plan: BuildPlan) -> str:
     L.append(f"  最低支持版本    : {plan.release_cfg.min_supported_version or '（未配置）'}")
     L.append(f"  release notes   : {plan.release_cfg.release_notes_file or '（未配置）'}")
     L.append(f"  输出 manifest   : {plan.release_cfg.output_manifest}")
+    L.append(f"  发布目标        : {plan.release_cfg.publish_remote or '（未配置，--publish 不可用）'}")
 
     L.append("\n[工具链]")
     for t in plan.tools:
@@ -787,7 +789,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="生成 manifest 后把产物 scp 到发布服务器（需配置 publish_remote）",
     )
-    parser.add_argument("--publish-remote", default=None, help="发布目标 user@host:/path（缺省取配置 publish_remote）")
+    parser.add_argument(
+        "--publish-remote",
+        default=None,
+        help="下载目录（Nginx /downloads/ 映射的物理目录），形如 user@host:/opt/.../downloads；缺省取配置 publish_remote",
+    )
     parser.add_argument("--json", action="store_true", help="输出 JSON 报告")
     args = parser.parse_args(argv)
 

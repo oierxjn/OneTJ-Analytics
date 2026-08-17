@@ -5,7 +5,7 @@ __pycache__/
 *.pyo
 *.pyd
 .env
-config/update_manifest.json
-config/release_spec.json
+config/*.json
+
 dist/
 release-notes/

@@ -383,7 +383,7 @@ python scripts/generate_update_manifest.py --spec <发布规格JSON路径> --out
 
 ### 一键构建 + 生成 manifest（build_release.py）
 
-[scripts/build_release.py](E:\Program\OneTJ-Analytics\scripts\build_release.py) 把「构建 OneTJ 客户端 -> 收集产物 -> 生成 manifest」整条链路自动化。**`release_spec.json` 已退役**：版本读自仓库 `pubspec.yaml`，产物路径 / 文件名 / 下载地址按约定推导，发布输入只剩少量参数。
+[scripts/build_release.py](E:\Program\OneTJ-Analytics\scripts\build_release.py) 把「构建 OneTJ 客户端 -> 收集产物 -> 生成 manifest」整条链路自动化。
 
 **直接执行即真实构建**（默认行为），flutter 一律通过 **fvm** 调用；默认读取 [config/release_config.json](E:\Program\OneTJ-Analytics\config\release_config.json) 提供默认值，命令行 flag 优先：
 
@@ -417,11 +417,30 @@ python scripts/build_release.py \
 
 发布配置（模板见 [config/release_config.json.example](E:\Program\OneTJ-Analytics\config\release_config.json.example)）：`repo`、`collect_dir`、`download_base`、`iscc`、`release_notes_file`、`min_supported_version`、`output_manifest`，可选 `publish_remote`（`--publish` 时的 scp 目标）。
 
-本脚本的单测：
+### 下载文件路由（Nginx `/downloads/`）
 
-```bash
-python -m pytest tests/test_build_release.py -q
-```
+客户端更新包的下载地址由三段组成，缺一不可：
+
+`download_url = https://<域名>/downloads/<产物文件名>`
+              └── download_base ──┘      └── publish_remote 对应目录中的文件 ──┘
+
+- **`download_base`**（配置）：`https://<域名>/downloads`，对应服务器 Nginx 的 `/downloads/` 路由；
+- **Nginx 路由**（服务器配置，需手工维护）：把 `/downloads/` 映射到物理目录 `/srv/onetj-downloads/`：
+  ```nginx
+  location /downloads/ {
+      alias /srv/onetj-downloads/;
+      add_header Content-Disposition "attachment";   # 强制下载，避免浏览器直接打开
+      types {
+          application/vnd.android.package-archive apk;   # APK 正确的 MIME
+      }
+  }
+  ```
+- **`publish_remote`**（配置）：`user@host:/srv/onetj-downloads`——即上面 `alias` 指向的**物理目录**（不是项目部署目录），`--publish` 时产物会被 scp 到这里。
+
+发布链路：`--publish`（默认即真实构建；已构建过可加 `--skip-build` 复用产物）-> 产物收集到 `dist/` -> 生成 manifest -> scp 到 `/srv/onetj-downloads/` -> 客户端通过 `https://<域名>/downloads/<文件名>` 下载。
+
+提示：物理目录名（`/srv/onetj-downloads`）是示例，请以服务器上实际 `nginx -T` 查到的 `alias` 为准。
+
 
 ## 常见误区
 
