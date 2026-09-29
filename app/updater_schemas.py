@@ -76,6 +76,24 @@ class UpdateCheckQuery(BaseModel):
         return f"{self.platform}:{self.arch or 'default'}"
 
 
+class LatestAppQuery(BaseModel):
+    platform: Literal["windows", "android"]
+    arch: str | None = None
+
+    @field_validator("arch", mode="before")
+    @classmethod
+    def validate_arch(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        return normalize_text(value, "arch").lower()
+
+    @property
+    def manifest_key(self) -> str:
+        if self.platform == "android":
+            return "android:default"
+        return f"{self.platform}:{self.arch or 'default'}"
+
+
 class UpdateManifestEntry(BaseModel):
     latest_version: str
     latest_build: int = Field(gt=0)

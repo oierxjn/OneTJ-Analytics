@@ -1,10 +1,16 @@
 from app.updater_repository import UpdateManifestRepository
-from app.updater_schemas import UpdateCheckData, UpdateCheckQuery
+from app.updater_schemas import LatestAppQuery, UpdateCheckData, UpdateCheckQuery, UpdateManifestEntry
 
 
 class UpdateCheckService:
     def __init__(self, repository: UpdateManifestRepository) -> None:
         self.repository = repository
+
+    def latest(self, query: LatestAppQuery) -> UpdateManifestEntry:
+        entry = self.repository.get(query.manifest_key)
+        if entry is None:
+            raise ValueError("unsupported platform or arch")
+        return entry
 
     def check(self, query: UpdateCheckQuery) -> UpdateCheckData:
         entry = self.repository.get(query.manifest_key)

@@ -6,6 +6,7 @@
 
 - 提供 `POST /collector/v1/events` 数据采集接口。
 - 提供 `GET /updater/v1/check` 自动更新检查接口。
+- 提供 `GET /app/latest` 最新包短链（302 跳转到 manifest 中对应平台的 `download_url`）。
 - 对请求 JSON 的字符串字段进行校验。
 - 对大部分字段执行去空白（trim）与非空校验。
 - `hashId` 为必填统计字段，缺失或空值直接返回 `400`
@@ -27,6 +28,7 @@
 
 - API 返回 `200` 表示请求已被接收（`redis` 模式下表示入队成功）。但不等于事件已写入数据库，落库由 worker 异步完成。
 - 更新检查接口为同步查询链路：`Updater API -> update_manifest.json -> JSON Response`。
+- 最新包短链为同步跳转链路：`Latest API -> update_manifest.json -> 302 download_url`，参数与更新检查一致（`?platform=windows&arch=x64`，Android 可省略 `arch`），与更新检查共用同一限流（`UPDATER_RATE_LIMIT_PER_MINUTE`）。
 
 ## 本地环境准备（Windows PowerShell）
 
@@ -208,6 +210,21 @@ Android：
 ```bash
 curl "http://127.0.0.1:8000/updater/v1/check?platform=android&current_version=2.2.4&current_build=11" \
   -H "Accept: application/json"
+```
+
+### 最新包下载短链
+
+Windows：
+
+```bash
+curl -v "http://127.0.0.1:8000/app/latest?platform=windows&arch=x64"
+# 302 Found，Location 即 manifest 中 windows:x64 的 download_url
+```
+
+Android（可省略 arch）：
+
+```bash
+curl -v "http://127.0.0.1:8000/app/latest?platform=android"
 ```
 
 ## 最小端到端验证（确认落库）

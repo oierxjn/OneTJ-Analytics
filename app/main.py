@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import ValidationError
 
 from app.config import Settings
@@ -14,7 +14,7 @@ from app.logging_utils import mask_sensitive_payload
 from app.middleware import CollectorMiddleware, get_client_ip
 from app.schemas import ApiResponse, EventIn
 from app.updater_repository import UpdateManifestRepository
-from app.updater_schemas import UpdateCheckQuery, UpdateCheckResponse
+from app.updater_schemas import LatestAppQuery, UpdateCheckQuery, UpdateCheckResponse
 from app.updater_service import UpdateCheckService
 
 logger = logging.getLogger("collector")
@@ -169,6 +169,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             message="accepted",
             request_id=request_id,
             data=data,
+        )
+
+    @app.get(
+        "/app/latest",
+        responses={
+            302: {"description": "Redirect to the latest download_url for the platform/arch."},
+            400: {"description": "Unsupported platform or arch."},
+            429: {"description": "Rate limit exceeded."},
+        },
+    )
+    async def get_latest_app(
+        request: Request,
+        platform: Literal["windows", "android"] = Query(...),
+        arch: str | None = Query(default=None),
+    ) -> RedirectResponse:
+        request_id = request_id_from(request)
+        update_service: UpdateCheckService = request.app.state.update_service
+
+        try:
+            query = LatestAppQuery(platform=platform, arch=arch)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=format_validation_message(exc)) from exc
+
+        try:
+            entry = update_service.latest(query)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        logger.info(
+            "latest app redirect request_id=%s platform=%s arch=%s download_url=%s",
+            request_id,
+            query.platform,
+            query.arch or "",
+            entry.download_url,
+        )
+        return RedirectResponse(
+            url=entry.download_url,
+            status_code=status.HTTP_302_FOUND,
+            headers={"X-Request-ID": request_id, "Cache-Control": "no-store"},
         )
 
     return app

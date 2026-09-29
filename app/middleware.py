@@ -74,7 +74,7 @@ class CollectorMiddleware(BaseHTTPMiddleware):
         return response
 
     def _rate_limit_for(self, request: Request) -> int:
-        if request.url.path == "/updater/v1/check":
+        if request.url.path in {"/updater/v1/check", "/app/latest"}:
             return self.settings.updater_rate_limit_per_minute
         return self.settings.rate_limit_per_minute
 
